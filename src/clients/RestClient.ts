@@ -1,74 +1,117 @@
+import axios, { AxiosInstance, AxiosResponse, AxiosError } from 'axios';
 import { TimeoutConfig } from "../types/Config.js";
 
 export class RestClient {
+    private readonly client: AxiosInstance;
     private readonly timeout: TimeoutConfig;
-    private readonly client: typeof fetch;
-    private readonly baseUrl: string;
 
-    constructor(baseUrl: string, customFetch?: typeof fetch) {
-        this.baseUrl = baseUrl;
+    constructor(baseUrl: string) {
         this.timeout = {
             connect: 3600,
             read: 3600,
             write: 3600,
             pool: 3600,
         };
-        this.client = customFetch || fetch;
-    }
 
-    async get(
-        url: string,
-        headers: Record<string, string>,
-        params?: Record<string, any>
-    ): Promise<Response> {
-        return this.makeRequest('GET', url, headers, undefined, params);
-    }
+        this.client = axios.create({
+            baseURL: baseUrl,
+            timeout: this.timeout.read * 1000,
+            headers: {
+                'Content-Type': 'application/json',
+            },
+        });
 
-    async post(
-        url: string,
-        requestBody: Record<string, any>,
-        headers?: Record<string, string>,
-        params?: Record<string, any>
-    ): Promise<Response> {
-        return this.makeRequest('POST', url, headers, requestBody, params);
-    }
-
-    async put(
-        url: string,
-        headers: Record<string, string>,
-        requestBody: Record<string, any>,
-        params?: Record<string, any>
-    ): Promise<Response> {
-        return this.makeRequest('PUT', url, headers, requestBody, params);
-    }
-
-    private async makeRequest(
-        method: string,
-        url: string,
-        headers?: Record<string, string>,
-        body?: Record<string, any>,
-        params?: Record<string, any>
-    ): Promise<Response> {
-        const queryParams = params ? `?${new URLSearchParams(params)}` : '';
-        const fullUrl = `${this.baseUrl}${url}${queryParams}`;
-
-        try {
-            const response = await this.client(fullUrl, {
-                method,
-                headers: {
-                    'Content-Type': 'application/json',
-                    ...headers,
-                },
-                body: body ? JSON.stringify(body) : undefined,
-                signal: AbortSignal.timeout(this.timeout.read * 1000),
-            });
-
-            if (!response.ok) {
-                throw new Error(`HTTP error! status: ${response.status}`);
+        // Add request interceptor for logging or modifying requests
+        this.client.interceptors.request.use(
+            (config) => {
+                return config;
+            },
+            (error) => {
+                return Promise.reject(error);
             }
-            return response;
-        } catch (e) {
-            throw new Error(`An error occurred while making ${method} request to ${url}: ${e}`);
-        }
+        );
+
+        // Add response interceptor for handling responses
+        this.client.interceptors.response.use(
+            (response) => {
+                return response;
+            },
+            async (error: AxiosError) => {
+                if (!error.response) {
+                    throw new Error('Network error or timeout occurred');
+                }
+
+                // Handle specific HTTP status codes
+                const { status, data } = error.response;
+                if (status >= 500) {
+                    throw new Error(`Server error: ${status}`);
+                }
+                if (status === 401) {
+                    throw new Error('Unauthorized');
+                }
+                if (status === 403) {
+                    throw new Error('Forbidden');
+                }
+                if (status === 404) {
+                    throw new Error('Resource not found');
+                }
+
+                // Handle other client errors
+                throw new Error(`Request failed with status ${status}: ${JSON.stringify(data)}`);
+            }
+        );
+    }
+
+    async get<T = any>(
+        url: string,
+        headers: Record<string, string> = {},
+        params?: Record<string, any>
+    ): Promise<T> {
+        const response = await this.client.get<T>(url, { headers, params });
+        return response.data;
+    }
+
+    async post<T = any>(
+        url: string,
+        body: Record<string, any>,
+        headers: Record<string, string> = {},
+        params?: Record<string, any>
+    ): Promise<T> {
+        const response = await this.client.post<T>(url, body, { headers, params });
+        return response.data;
+    }
+
+    async put<T = any>(
+        url: string,
+        body: Record<string, any>,
+        headers: Record<string, string> = {},
+        params?: Record<string, any>
+    ): Promise<T> {
+        const response = await this.client.put<T>(url, body, { headers, params });
+        return response.data;
+    }
+
+    async delete<T = any>(
+        url: string,
+        headers: Record<string, string> = {},
+        params?: Record<string, any>
+    ): Promise<T> {
+        const response = await this.client.delete<T>(url, { headers, params });
+        return response.data;
+    }
+
+    addResponseInterceptor(
+        onFulfilled?: (value: AxiosResponse) => any | Promise<any>,
+        onRejected?: (error: AxiosError) => any
+    ) {
+        return this.client.interceptors.response.use(onFulfilled, onRejected);
+    }
+
+    setBaseHeader(key: string, value: string) {
+        this.client.defaults.headers.common[key] = value;
+    }
+
+    setTimeout(timeoutMs: number) {
+        this.client.defaults.timeout = timeoutMs;
     }
 }

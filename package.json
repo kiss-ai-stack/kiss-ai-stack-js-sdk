@@ -1,6 +1,6 @@
 {
   "name": "kiss-ai-stack-client",
-  "version": "0.1.0a23",
+  "version": "0.1.0a26",
   "type": "module",
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
@@ -28,6 +28,7 @@
   },
   "dependencies": {
     "@types/ws": "^8.5.13",
+    "axios": "^1.7.9",
     "ws": "^8.18.0"
   },
   "engines": {

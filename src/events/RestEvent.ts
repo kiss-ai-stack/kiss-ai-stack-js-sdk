@@ -10,7 +10,6 @@ import {
     SessionResponse
 } from "../types/dtos.js";
 
-
 export class RestEvent extends EventAbc {
     private readonly hostname: string;
     private readonly secureProtocol: boolean;
@@ -39,23 +38,22 @@ export class RestEvent extends EventAbc {
         scope?: string
     ): Promise<SessionResponse> {
         try {
-            const response = await this.client.post(
+            const data = await this.client.post<SessionResponse>(
                 '/auth',
                 {
                     client_id: clientId,
                     client_secret: clientSecret,
                     scope: scope
-                } as SessionRequest,
-                {}
+                } as SessionRequest
             );
 
-            const data = await response.json() as unknown as SessionResponse;
             if (!data.access_token) {
                 throw new Error('No access token received');
             }
 
             this.session = data;
             this.headers.Authorization = `Bearer ${data.access_token}`;
+            this.client.setBaseHeader('Authorization', `Bearer ${data.access_token}`);
 
             return data;
         } catch (e) {
@@ -68,21 +66,21 @@ export class RestEvent extends EventAbc {
         try {
             if (!this.headers.Authorization) {
                 console.warn('No active session to destroy');
-                return {result: 'No active session'};
+                return { result: 'No active session' };
             }
 
-            const response = await this.client.post(
+            const result = await this.client.post<GenericResponseBody>(
                 '/sessions',
-                {query: data || 'Goodbye!'} as QueryRequestBody,
+                { query: data || 'Goodbye!' } as QueryRequestBody,
                 this.headers,
-                {action: 'close'}
+                { action: 'close' }
             );
 
-            const result = await response.json();
             this.session = null;
             delete this.headers.Authorization;
+            this.client.setBaseHeader('Authorization', '');
 
-            return result as GenericResponseBody;
+            return result;
         } catch (e) {
             console.error('Failed to destroy stack session:', e);
             throw e;
@@ -95,14 +93,12 @@ export class RestEvent extends EventAbc {
                 throw new Error('No active session. Call authorizeStack first.');
             }
 
-            const response = await this.client.post(
+            return await this.client.post<GenericResponseBody>(
                 '/sessions',
-                {query: data} as QueryRequestBody,
+                { query: data } as QueryRequestBody,
                 this.headers,
-                {action: 'init'}
+                { action: 'init' }
             );
-
-            return (await response.json()) as GenericResponseBody;
         } catch (e) {
             console.error('Failed to bootstrap stack:', e);
             throw e;
@@ -115,13 +111,11 @@ export class RestEvent extends EventAbc {
                 throw new Error('No active authorization. Call authorizeStack first.');
             }
 
-            const response = await this.client.post(
+            return await this.client.post<GenericResponseBody>(
                 '/queries',
-                {query: data} as QueryRequestBody,
+                { query: data } as QueryRequestBody,
                 this.headers
             );
-
-            return (await response.json()) as GenericResponseBody;
         } catch (e) {
             console.error('Failed to generate answer:', e);
             throw e;
@@ -145,7 +139,7 @@ export class RestEvent extends EventAbc {
                         return {
                             name: filePath.split('/').pop() || '',
                             content: base64
-                        } as unknown as FileObject;
+                        } as FileObject;
                     } catch (e) {
                         console.warn(`File not found: ${filePath}`);
                         return null;
@@ -159,7 +153,7 @@ export class RestEvent extends EventAbc {
                 throw new Error('No valid files to store');
             }
 
-            const response = await this.client.post(
+            return await this.client.post<GenericResponseBody>(
                 '/documents',
                 {
                     files: validFiles,
@@ -167,8 +161,6 @@ export class RestEvent extends EventAbc {
                 } as DocumentsRequestBody,
                 this.headers
             );
-
-            return (await response.json()) as GenericResponseBody;
         } catch (e) {
             console.error('Failed to store documents:', e);
             throw e;

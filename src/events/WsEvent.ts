@@ -1,10 +1,9 @@
 import fs from "fs/promises";
 import { EventAbc } from "./EventsAbc.js";
 import { RestClient } from "../clients/RestClient.js";
-import { FileObject, GenericResponseBody, SessionRequest, SessionResponse } from "../types/dtos.js";
+import { FileObject, GenericResponseBody, SessionResponse } from "../types/dtos.js";
 import { WebSocketClient } from "../clients/WebSocketClient.js";
 import { ServerEvent } from "../types/ServerEvent.js";
-
 
 export class WebSocketEvent extends EventAbc {
     private readonly hostname: string;
@@ -25,7 +24,7 @@ export class WebSocketEvent extends EventAbc {
     async initClient(): Promise<void> {
         this.client = new WebSocketClient(
             `${this.secureProtocol ? 'wss' : 'ws'}://${this.hostname}/ws`,
-            this.headers || undefined
+            this.headers || {}
         );
         await this.client.connect();
     }
@@ -40,23 +39,18 @@ export class WebSocketEvent extends EventAbc {
                 `${this.secureProtocol ? 'https' : 'http'}://${this.hostname}`
             );
 
-            const response = await httpClient.post(
-                '/auth',
-                {
-                    client_id: clientId,
-                    client_secret: clientSecret,
-                    scope: scope
-                } as SessionRequest,
-                {}
-            );
+            const sessionResult = await httpClient.post<SessionResponse>('/auth', {
+                client_id: clientId,
+                client_secret: clientSecret,
+                scope: scope
+            });
 
-            const sessionResult = (await response.json()) as SessionResponse;
             if (!sessionResult.access_token) {
                 throw new Error('No access token received');
             }
 
             this.session = sessionResult;
-            this.headers = {Authorization: `Bearer ${sessionResult.access_token}`};
+            this.headers = { Authorization: `Bearer ${sessionResult.access_token}` };
 
             if (!this.client) {
                 await this.initClient();
@@ -84,10 +78,9 @@ export class WebSocketEvent extends EventAbc {
 
     async bootstrapStack(data?: string): Promise<GenericResponseBody> {
         try {
-            const response = await this.sendMessage(ServerEvent.ON_INIT, {
+            return await this.sendMessage(ServerEvent.ON_INIT, {
                 query: data || 'Greetings!'
             });
-            return response;
         } catch (e) {
             console.error('Failed to bootstrap stack:', e);
             throw e;
@@ -96,10 +89,9 @@ export class WebSocketEvent extends EventAbc {
 
     async generateAnswer(data?: string): Promise<GenericResponseBody> {
         try {
-            const response = await this.sendMessage(ServerEvent.ON_QUERY, {
+            return await this.sendMessage(ServerEvent.ON_QUERY, {
                 query: data
             });
-            return response;
         } catch (e) {
             console.error('Failed to generate answer:', e);
             throw e;
@@ -111,7 +103,7 @@ export class WebSocketEvent extends EventAbc {
         metadata?: Record<string, any>
     ): Promise<GenericResponseBody> {
         try {
-            const encodedFiles: Awaited<FileObject | null>[] = await Promise.all(
+            const encodedFiles: FileObject[] = (await Promise.all(
                 files.map(async (filePath) => {
                     try {
                         const buffer = await fs.readFile(filePath);
@@ -119,22 +111,20 @@ export class WebSocketEvent extends EventAbc {
                         return {
                             name: filePath.split('/').pop() || '',
                             content: base64
-                        } as unknown as FileObject;
+                        };
                     } catch (e) {
                         console.warn(`File not found: ${filePath}`);
                         return null;
                     }
                 })
-            );
+            )).filter((file): file is FileObject => file !== null);
 
-            const validFiles = encodedFiles.filter((file): file is FileObject => file !== null);
-
-            if (validFiles.length === 0) {
+            if (encodedFiles.length === 0) {
                 throw new Error('No valid files to store');
             }
 
             return await this.sendMessage(ServerEvent.ON_STORE, {
-                files: validFiles.map(f => ({name: f.name, content: f.content})),
+                files: encodedFiles,
                 metadata: metadata || {}
             });
         } catch (e) {
@@ -147,17 +137,17 @@ export class WebSocketEvent extends EventAbc {
         event: ServerEvent,
         data?: Record<string, any>
     ): Promise<any> {
-        if (!this.client || !this.client.websocket) {
+        if (!this.client) {
             await this.initClient();
         }
 
-        const message = {event, data: data || ''};
+        const message = { event, data: data || {} };
         console.info('Sending message:', message);
 
-        await this.client!.send(JSON.stringify(message));
-        const response = await this.client!.receive();
+        await this.client?.send(message);
+        const response = await this.client?.receive();
         console.info('Received response:', response);
 
-        return JSON.parse(response);
+        return JSON.parse(response || 'Websocket client not connected');
     }
 }
